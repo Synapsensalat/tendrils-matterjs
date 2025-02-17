@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Interactive Tendrils</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: white;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            font-family: Arial, sans-serif;
+            touch-action: none;
+        }
+        #toggleControls {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            z-index: 1001;
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        #toggleControls:hover {
+            background: #0056b3;
+        }
+        #controls {
+            position: fixed;
+            top: 70px;
+            left: 20px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            z-index: 1000;
+            max-height: 80vh;
+            overflow-y: auto;
+            transition: transform 0.3s ease;
+        }
+        #controls.hidden {
+            transform: translateX(-120%);
+        }
+        .control-group {
+            margin-bottom: 15px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 15px;
+        }
+        .control-group:last-child {
+            border-bottom: none;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 14px;
+            color: #333;
+        }
+        input {
+            width: 120px;
+            padding: 5px;
+            margin-bottom: 5px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        input:focus {
+            border-color: #007bff;
+            outline: none;
+        }
+        .apply-button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            width: 100%;
+            margin-top: 10px;
+        }
+        .apply-button:hover {
+            background: #0056b3;
+        }
+        .section-title {
+            font-weight: bold;
+            margin: 15px 0 10px;
+            color: #333;
+            font-size: 16px;
+        }
+        canvas {
+            max-width: 100%;
+            max-height: 100%;
+        }
+    </style>
+</head>
+<body>
+    <button id="toggleControls">Toggle Controls</button>
+    <div id="controls" class="hidden">
+        <div class="section-title">Structure</div>
+        <div class="control-group">
+            <label for="numTendrils">Number of Tendrils:</label>
+            <input type="number" id="numTendrils" value="5" min="1" max="12">
+            
+            <label for="segmentsPerTendril">Segments per Tendril:</label>
+            <input type="number" id="segmentsPerTendril" value="15" min="1" max="50">
+            
+            <label for="rootSize">Root Size:</label>
+            <input type="number" id="rootSize" value="20" min="5" max="50">
+            
+            <label for="startSize">Start Size:</label>
+            <input type="number" id="startSize" value="10" min="2" max="30">
+            
+            <label for="endSize">End Size:</label>
+            <input type="number" id="endSize" value="2" min="1" max="20">
+        </div>
+
+        <div class="section-title">Physics</div>
+        <div class="control-group">
+            <label for="stiffness">Constraint Stiffness:</label>
+            <input type="number" id="stiffness" value="0.01" min="0.001" max="0.1" step="0.001">
+            
+            <label for="friction">Friction:</label>
+            <input type="number" id="friction" value="0.5" min="0" max="1" step="0.1">
+            
+            <label for="frictionAir">Air Friction:</label>
+            <input type="number" id="frictionAir" value="0.03" min="0" max="0.1" step="0.01">
+            
+            <label for="mass">Segment Mass:</label>
+            <input type="number" id="mass" value="0.1" min="0.01" max="1" step="0.01">
+        </div>
+
+        <div class="section-title">Movement</div>
+        <div class="control-group">
+            <label for="baseForce">Base Force:</label>
+            <input type="number" id="baseForce" value="0.00001" min="0.000001" max="0.0001" step="0.000001">
+            
+            <label for="waveForce">Wave Force:</label>
+            <input type="number" id="waveForce" value="0.00002" min="0.000001" max="0.0001" step="0.000001">
+            
+            <label for="repulsionRange">Repulsion Range:</label>
+            <input type="number" id="repulsionRange" value="50" min="10" max="200" step="1">
+            
+            <label for="repulsionForce">Repulsion Force:</label>
+            <input type="number" id="repulsionForce" value="0.00001" min="0.000001" max="0.0001" step="0.000001">
+        </div>
+
+        <button class="apply-button" onclick="resetNetwork()">Apply Changes</button>
+    </div>
+    <script>
+        const { Engine, Render, World, Bodies, Constraint, Body, Vector, Mouse, MouseConstraint } = Matter;
+
+        function easeInOutSine(t) {
+            return -(Math.cos(Math.PI * t) - 1) / 2;
+        }
+
+        const engine = Engine.create();
+        engine.gravity.y = 0;
+
+        const render = Render.create({
+            element: document.body,
+            engine: engine,
+            options: {
+                width: 390,
+                height: 844,
+                wireframes: false,
+                background: 'white'
+            }
+        });
+
+        // Add toggle controls functionality
+        document.getElementById('toggleControls').addEventListener('click', () => {
+            document.getElementById('controls').classList.toggle('hidden');
+        });
+
+        class Network {
+            constructor() {
+                this.segments = [];
+                this.constraints = [];
+                this.centerX = 195;
+                this.centerY = 422;
+                this.time = 0;
+                
+                // Get all values from inputs
+                this.totalTendrils = parseInt(document.getElementById('numTendrils').value);
+                this.maxSegmentsPerTendril = parseInt(document.getElementById('segmentsPerTendril').value);
+                this.rootSize = parseInt(document.getElementById('rootSize').value);
+                this.startSize = parseInt(document.getElementById('startSize').value);
+                this.endSize = parseInt(document.getElementById('endSize').value);
+                
+                // Physics parameters
+                this.stiffness = parseFloat(document.getElementById('stiffness').value);
+                this.friction = parseFloat(document.getElementById('friction').value);
+                this.frictionAir = parseFloat(document.getElementById('frictionAir').value);
+                this.mass = parseFloat(document.getElementById('mass').value);
+                
+                // Movement parameters
+                this.baseForce = parseFloat(document.getElementById('baseForce').value);
+                this.waveForce = parseFloat(document.getElementById('waveForce').value);
+                this.repulsionRange = parseFloat(document.getElementById('repulsionRange').value);
+                this.repulsionForce = parseFloat(document.getElementById('repulsionForce').value);
+                
+                this.tendrilMovements = Array(this.totalTendrils).fill().map(() => ({
+                    frequencies: [
+                        { x: 2 + Math.random(), y: 2 + Math.random() },
+                        { x: 4 + Math.random(), y: 4 + Math.random() },
+                        { x: 8 + Math.random(), y: 8 + Math.random() }
+                    ],
+                    offsets: Array(3).fill().map(() => ({
+                        x: Math.random() * Math.PI * 2,
+                        y: Math.random() * Math.PI * 2
+                    }))
+                }));
+                
+                this.centerPoint = Bodies.circle(this.centerX, this.centerY, this.rootSize, {
+                    isStatic: true,
+                    render: { fillStyle: '#000000' }
+                });
+                World.add(engine.world, this.centerPoint);
+
+                this.startingAngles = Array(this.totalTendrils).fill().map((_, i) => (i / this.totalTendrils) * Math.PI * 2);
+                
+                // Create all segments immediately
+                for (let i = 0; i < this.totalTendrils; i++) {
+                    for (let j = 0; j < this.maxSegmentsPerTendril; j++) {
+                        this.addSegment(i);
+                    }
+                }
+            }
+
+            addSegment(tendrilIndex) {
+                const baseAngle = this.startingAngles[tendrilIndex];
+                const tendrilSegments = this.segments.filter(s => s.tendrilIndex === tendrilIndex);
+                const segmentCount = tendrilSegments.length;
+                
+                let attachTo = this.centerPoint;
+                let startX = this.centerX;
+                let startY = this.centerY;
+                let previousSize = segmentCount === 0 ? this.rootSize : this.startSize;
+
+                if (segmentCount > 0) {
+                    const lastSegment = tendrilSegments[segmentCount - 1];
+                    attachTo = lastSegment;
+                    startX = lastSegment.position.x;
+                    startY = lastSegment.position.y;
+                    previousSize = lastSegment.circleRadius;
+                }
+
+                const progress = segmentCount / this.maxSegmentsPerTendril;
+                const currentSize = this.startSize - (this.startSize - this.endSize) * progress;
+                const segmentLength = previousSize + currentSize;
+
+                const circle = Bodies.circle(
+                    startX + Math.cos(baseAngle) * segmentLength,
+                    startY + Math.sin(baseAngle) * segmentLength,
+                    currentSize,
+                    {
+                        mass: this.mass,
+                        friction: this.friction,
+                        frictionAir: this.frictionAir,
+                        render: { fillStyle: '#000000' },
+                        tendrilIndex: tendrilIndex,
+                        circleRadius: currentSize,
+                        collisionFilter: {
+                            group: 1
+                        }
+                    }
+                );
+                
+                World.add(engine.world, circle);
+                this.segments.push(circle);
+
+                const constraint = Constraint.create({
+                    bodyA: attachTo,
+                    bodyB: circle,
+                    length: segmentLength,
+                    stiffness: this.stiffness,
+                    render: { 
+                        visible: false
+                    }
+                });
+                
+                World.add(engine.world, constraint);
+                this.constraints.push(constraint);
+            }
+
+            applyRepulsion(endSegment) {
+                const otherEnds = this.segments.filter(s => 
+                    s.tendrilIndex !== endSegment.tendrilIndex && 
+                    this.segments.filter(seg => seg.tendrilIndex === s.tendrilIndex)
+                        .indexOf(s) === this.segments.filter(seg => seg.tendrilIndex === s.tendrilIndex).length - 1
+                );
+
+                otherEnds.forEach(other => {
+                    const dx = endSegment.position.x - other.position.x;
+                    const dy = endSegment.position.y - other.position.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    if (distance < this.repulsionRange) {
+                        const force = this.repulsionForce * (1 - distance / this.repulsionRange);
+                        const angle = Math.atan2(dy, dx);
+                        
+                        Body.applyForce(endSegment, endSegment.position, {
+                            x: Math.cos(angle) * force,
+                            y: Math.sin(angle) * force
+                        });
+                    }
+                });
+            }
+
+            applySmoothMovement() {
+                this.time += 0.002;
+
+                for (let i = 0; i < this.totalTendrils; i++) {
+                    const tendrilSegments = this.segments.filter(s => s.tendrilIndex === i);
+                    if (tendrilSegments.length > 0) {
+                        const endSegment = tendrilSegments[tendrilSegments.length - 1];
+                        const movement = this.tendrilMovements[i];
+                        const baseAngle = this.startingAngles[i];
+
+                        let totalX = 0;
+                        let totalY = 0;
+                        
+                        movement.frequencies.forEach((freq, index) => {
+                            const offset = movement.offsets[index];
+                            totalX += Math.sin(this.time * freq.x + offset.x);
+                            totalY += Math.sin(this.time * freq.y + offset.y);
+                        });
+                        
+                        totalX = easeInOutSine(totalX / movement.frequencies.length * 0.5 + 0.5);
+                        totalY = easeInOutSine(totalY / movement.frequencies.length * 0.5 + 0.5);
+                        
+                        const forceX = (totalX - 0.5) * this.waveForce + Math.cos(baseAngle) * this.baseForce;
+                        const forceY = (totalY - 0.5) * this.waveForce + Math.sin(baseAngle) * this.baseForce;
+                        
+                        Body.applyForce(endSegment, endSegment.position, {
+                            x: forceX,
+                            y: forceY
+                        });
+
+                        this.applyRepulsion(endSegment);
+                    }
+                }
+            }
+
+            update() {
+                this.applySmoothMovement();
+            }
+        }
+
+        let network = new Network();
+
+        function resetNetwork() {
+            // Remove all existing bodies and constraints
+            World.clear(engine.world);
+            // Create new network with updated values
+            network = new Network();
+            // Re-add mouse constraint
+            World.add(engine.world, mouseConstraint);
+        }
+
+        // Add mouse control
+        const mouse = Mouse.create(render.canvas);
+        const mouseConstraint = MouseConstraint.create(engine, {
+            mouse: mouse,
+            constraint: {
+                stiffness: 0.2,
+                render: {
+                    visible: false
+                }
+            }
+        });
+
+        World.add(engine.world, mouseConstraint);
+        render.mouse = mouse;
+
+        // Create draggable circle on mouse/touch down
+        let dragCircle = null;
+        let isPressed = false;
+
+        render.canvas.addEventListener('mousedown', handlePress);
+        render.canvas.addEventListener('touchstart', handlePress);
+
+        function handlePress(e) {
+            if (isPressed) return;
+            isPressed = true;
+
+            const rect = render.canvas.getBoundingClientRect();
+            const x = (e.clientX || e.touches[0].clientX) - rect.left;
+            const y = (e.clientY || e.touches[0].clientY) - rect.top;
+
+            dragCircle = Bodies.circle(x, y, 15, {
+                mass: 1,
+                friction: 0.5,
+                frictionAir: 0.03,
+                render: { 
+                    fillStyle: '#ff4444'
+                }
+            });
+
+            World.add(engine.world, dragCircle);
+        }
+
+        render.canvas.addEventListener('mouseup', handleRelease);
+        render.canvas.addEventListener('touchend', handleRelease);
+
+        function handleRelease() {
+            isPressed = false;
+            if (dragCircle) {
+                setTimeout(() => {
+                    World.remove(engine.world, dragCircle);
+                    dragCircle = null;
+                }, 100); // Small delay to allow for smooth release
+            }
+        }
+
+        function update() {
+            network.update();
+            Engine.update(engine, 1000 / 60);
+            requestAnimationFrame(update);
+        }
+
+        Render.run(render);
+        requestAnimationFrame(update);
+    </script>
+</body>
+</html>
