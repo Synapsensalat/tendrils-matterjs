@@ -106,10 +106,10 @@
         <div class="section-title">Structure</div>
         <div class="control-group">
             <label for="numTendrils">Number of Tendrils:</label>
-            <input type="number" id="numTendrils" value="5" min="1" max="12">
+            <input type="number" id="numTendrils" value="4" min="1" max="12">
             
             <label for="segmentsPerTendril">Segments per Tendril:</label>
-            <input type="number" id="segmentsPerTendril" value="15" min="1" max="50">
+            <input type="number" id="segmentsPerTendril" value="30" min="1" max="50">
             
             <label for="rootSize">Root Size:</label>
             <input type="number" id="rootSize" value="20" min="5" max="50">
@@ -364,7 +364,7 @@
             World.add(engine.world, mouseConstraint);
         }
 
-        // Add mouse control
+        // Add mouse control with proper scaling
         const mouse = Mouse.create(render.canvas);
         const mouseConstraint = MouseConstraint.create(engine, {
             mouse: mouse,
@@ -376,6 +376,16 @@
             }
         });
 
+        // Scale mouse position based on canvas scaling
+        mouse.scale = {
+            x: 1 / (render.bounds.max.x - render.bounds.min.x) * render.options.width,
+            y: 1 / (render.bounds.max.y - render.bounds.min.y) * render.options.height
+        };
+        mouse.offset = {
+            x: render.bounds.min.x,
+            y: render.bounds.min.y
+        };
+
         World.add(engine.world, mouseConstraint);
         render.mouse = mouse;
 
@@ -383,18 +393,27 @@
         let dragCircle = null;
         let isPressed = false;
 
+        function getScaledPoint(e, canvas) {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            
+            return {
+                x: ((e.clientX || e.touches[0].clientX) - rect.left) * scaleX,
+                y: ((e.clientY || e.touches[0].clientY) - rect.top) * scaleY
+            };
+        }
+
         render.canvas.addEventListener('mousedown', handlePress);
-        render.canvas.addEventListener('touchstart', handlePress);
+        render.canvas.addEventListener('touchstart', handlePress, { passive: false });
 
         function handlePress(e) {
+            e.preventDefault();
             if (isPressed) return;
             isPressed = true;
 
-            const rect = render.canvas.getBoundingClientRect();
-            const x = (e.clientX || e.touches[0].clientX) - rect.left;
-            const y = (e.clientY || e.touches[0].clientY) - rect.top;
-
-            dragCircle = Bodies.circle(x, y, 15, {
+            const point = getScaledPoint(e, render.canvas);
+            dragCircle = Bodies.circle(point.x, point.y, 15, {
                 mass: 1,
                 friction: 0.5,
                 frictionAir: 0.03,
@@ -408,14 +427,16 @@
 
         render.canvas.addEventListener('mouseup', handleRelease);
         render.canvas.addEventListener('touchend', handleRelease);
+        render.canvas.addEventListener('touchcancel', handleRelease);
 
-        function handleRelease() {
+        function handleRelease(e) {
+            if (e) e.preventDefault();
             isPressed = false;
             if (dragCircle) {
                 setTimeout(() => {
                     World.remove(engine.world, dragCircle);
                     dragCircle = null;
-                }, 100); // Small delay to allow for smooth release
+                }, 100);
             }
         }
 
